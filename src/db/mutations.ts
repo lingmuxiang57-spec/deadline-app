@@ -69,6 +69,37 @@ export function deleteTask(db: Db, id: number): boolean {
   );
 }
 
+/**
+ * リストから「削除」する（未着手のものだけ）。
+ *   - 手入力の締切 → DBから消す
+ *   - フィード由来の締切 → 「削除済み」にしてリストに出さない。DBには残してUIDで見分け、同期で再び取り込まない
+ */
+export function dismissTask(db: Db, id: number): boolean {
+  return db.transaction((tx) => {
+    const task = tx
+      .select({ sourceId: tasks.sourceId })
+      .from(tasks)
+      .where(and(eq(tasks.id, id), eq(tasks.status, "todo")))
+      .get();
+    if (!task) return false;
+    if (task.sourceId === null) {
+      return changed(tx.delete(tasks).where(eq(tasks.id, id)).run());
+    }
+    return changed(tx.update(tasks).set({ status: "dismissed" }).where(eq(tasks.id, id)).run());
+  });
+}
+
+/** 「削除済み」を未着手に戻す */
+export function restoreTask(db: Db, id: number): boolean {
+  return changed(
+    db
+      .update(tasks)
+      .set({ status: "todo" })
+      .where(and(eq(tasks.id, id), eq(tasks.status, "dismissed")))
+      .run(),
+  );
+}
+
 function changed(result: { changes: number }): boolean {
   return result.changes > 0;
 }

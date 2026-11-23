@@ -56,6 +56,17 @@ export async function deleteTask(formData: FormData): Promise<void> {
   refresh();
 }
 
+/** 見積もりの欄などから「削除」。手入力は消し、フィード由来は「削除済み」にする */
+export async function dismissTask(formData: FormData): Promise<void> {
+  mutations.dismissTask(getDb(), readId(formData));
+  refresh();
+}
+
+export async function restoreTask(formData: FormData): Promise<void> {
+  mutations.restoreTask(getDb(), readId(formData));
+  refresh();
+}
+
 /** 「今すぐ同期」。自動同期の間隔を待たずにすべてのフィードを取りに行く */
 export async function syncNow(): Promise<void> {
   await syncAllSources(getDb());

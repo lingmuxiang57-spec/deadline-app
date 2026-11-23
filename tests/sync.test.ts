@@ -265,6 +265,21 @@ describe("planSync", () => {
     expect(plan.updates).toEqual([]);
   });
 
+  it("自分で削除したもの（dismissed）は、フィードにあっても二重に追加せず、状態も変えない", () => {
+    const later = new Date("2026-12-10T14:59:00Z");
+    const plan = planSync(
+      [task({ id: 1, externalUid: "a", status: "dismissed" })],
+      [event("a", { deadline: later })],
+      now,
+    );
+    expect(plan).toEqual({ inserts: [], updates: [{ id: 1, changes: { deadline: later } }] });
+  });
+
+  it("自分で削除したものがフィードから消えても「取り消し確認」にしない", () => {
+    const plan = planSync([task({ id: 1, externalUid: "a", status: "dismissed" })], [], now);
+    expect(plan.updates).toEqual([]);
+  });
+
   it("「残す」を選んだものがフィードに戻ったら、件名・締切の変更は反映し、二重に追加しない", () => {
     const later = new Date("2026-12-10T14:59:00Z");
     const plan = planSync(

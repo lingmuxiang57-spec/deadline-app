@@ -15,6 +15,8 @@ export interface TaskBoard {
   cancelPending: TaskWithSource[];
   /** 今日（日本時間）完了にしたもの。押し間違いを戻せるように出す */
   doneToday: TaskWithSource[];
+  /** 自分で「削除」したフィード由来の締切。押し間違いを戻せるように出す */
+  dismissed: TaskWithSource[];
 }
 
 export function getTaskBoard(db: Db, now: Date): TaskBoard {
@@ -31,6 +33,8 @@ export function getTaskBoard(db: Db, now: Date): TaskBoard {
     open: rows.filter((t) => t.status === "todo"),
     cancelPending: rows.filter((t) => t.status === "cancel_pending"),
     doneToday: rows.filter((t) => t.status === "done" && t.updatedAt >= startOfToday),
+    // 締切が過ぎたものは戻す必要がないので出さない
+    dismissed: rows.filter((t) => t.status === "dismissed" && t.deadline >= now),
   };
 }
 

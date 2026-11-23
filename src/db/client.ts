@@ -31,9 +31,30 @@ export function createDb(databasePath: string): Db {
 }
 
 // 開発中のホットリロードで接続が増えないよう、1つの接続を使い回す
-const globalForDb = globalThis as unknown as { __deadlineDb?: Db };
+const globalForDb = globalThis as unknown as { __deadlineDb?: Db; __deadlineJournalMtime?: number };
+
+const JOURNAL_PATH = path.join(MIGRATIONS_FOLDER, "meta", "_journal.json");
 
 export function getDb(): Db {
-  globalForDb.__deadlineDb ??= createDb(process.env.DATABASE_PATH || DEFAULT_DATABASE_PATH);
+  if (!globalForDb.__deadlineDb) {
+    globalForDb.__deadlineDb = createDb(process.env.DATABASE_PATH || DEFAULT_DATABASE_PATH);
+    globalForDb.__deadlineJournalMtime = journalMtime();
+  } else if (process.env.NODE_ENV !== "production") {
+    // 開発中は接続を使い回すので、起動後に増えたマイグレーションが当たらない。
+    // マイグレーションの一覧が更新されていたら、再起動しなくてもその場で当てる
+    const mtime = journalMtime();
+    if (mtime !== globalForDb.__deadlineJournalMtime) {
+      migrate(globalForDb.__deadlineDb, { migrationsFolder: MIGRATIONS_FOLDER });
+      globalForDb.__deadlineJournalMtime = mtime;
+    }
+  }
   return globalForDb.__deadlineDb;
+}
+
+function journalMtime(): number | undefined {
+  try {
+    return fs.statSync(JOURNAL_PATH).mtimeMs;
+  } catch {
+    return undefined;
+  }
 }

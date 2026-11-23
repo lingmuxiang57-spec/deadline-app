@@ -317,3 +317,56 @@ describe("syncSource の細かい場合", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe("リストからの削除（dismissTask / restoreTask）", () => {
+  const ics = calendar(
+    { uid: "busy", title: "Busy", start: "20261204T145900Z" },
+    { uid: "hw", title: "レポート", start: "20261205T145900Z" },
+  );
+
+  it("フィード由来は「削除済み」になり、再同期しても戻らない。戻すと未着手に戻る", async () => {
+    const source = addSource();
+    await syncSource(db, source.id, now, serve(ics));
+    const busy = db.select().from(tasks).where(eq(tasks.externalUid, "busy")).get()!;
+
+    expect(mutations.dismissTask(db, busy.id)).toBe(true);
+    expect(getTaskBoard(db, now)).toMatchObject({
+      open: [expect.objectContaining({ title: "レポート" })],
+      dismissed: [expect.objectContaining({ title: "Busy" })],
+    });
+
+    const resync = await syncSource(db, source.id, now, serve(ics));
+    expect(resync).toMatchObject({ ok: true, inserted: 0, updated: 0 });
+    expect(db.select().from(tasks).all()).toHaveLength(2);
+    expect(db.select().from(tasks).where(eq(tasks.id, busy.id)).get()?.status).toBe("dismissed");
+
+    expect(mutations.restoreTask(db, busy.id)).toBe(true);
+    expect(db.select().from(tasks).where(eq(tasks.id, busy.id)).get()?.status).toBe("todo");
+  });
+
+  it("手入力はDBから消す（「削除済み」は残さない）", () => {
+    const id = mutations.addManualTask(db, { title: "手入力", deadline: future });
+    expect(mutations.dismissTask(db, id)).toBe(true);
+    expect(db.select().from(tasks).all()).toEqual([]);
+  });
+
+  it("未着手でないもの（完了・取り消し確認）は削除しない", () => {
+    const id = mutations.addManualTask(db, { title: "完了済み", deadline: future });
+    mutations.completeTask(db, id);
+    expect(mutations.dismissTask(db, id)).toBe(false);
+    expect(mutations.restoreTask(db, id)).toBe(false); // 削除済みでないものは戻さない
+  });
+
+  it("手入力を「削除済み」にはできない（DBの制約）", () => {
+    expect(() =>
+      db.insert(tasks).values({ title: "x", deadline: future, status: "dismissed" }).run(),
+    ).toThrow(/CHECK/);
+  });
+
+  it("締切が過ぎた「削除済み」は一覧に出さない", async () => {
+    const source = addSource();
+    await syncSource(db, source.id, now, serve(ics));
+    for (const t of db.select().from(tasks).all()) mutations.dismissTask(db, t.id);
+    expect(getTaskBoard(db, new Date("2026-12-05T10:00:00Z")).dismissed.map((t) => t.title)).toEqual(["レポート"]);
+  });
+});

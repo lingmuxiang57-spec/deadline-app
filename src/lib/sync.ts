@@ -10,6 +10,7 @@
  *   - フィードから消えたものは削除せず「取り消し確認」にする。ただし未着手で締切が未来のものに限る
  *     （過去の締切はフィードから自然に消えることがあるため）
  *   - 「取り消し確認」で自分が「残す」を選んだものは、以後フィードになくても確認に戻さない
+ *   - 自分で「削除」したもの（dismissed）は、件名・締切の変更だけ反映し、状態は変えない（リストに戻さない）
  *   - 「取り消し確認」のものがフィードに戻ってきたら未着手に戻す
  *   - 新しいものは締切が未来のものだけ追加する（過去の課題で「今日やる」が埋まらないように）
  *
@@ -18,7 +19,11 @@
 import ICAL from "ical.js";
 import { TIME_ZONE, isValidTimeZone, jstDateTime, formatDateKey, zonedTimeToDate } from "./date";
 
-export type TaskStatus = "todo" | "done" | "cancel_pending";
+/**
+ * todo: 未着手 / done: 完了 / cancel_pending: 取り消し確認
+ * dismissed: 自分で「削除」したフィード由来の締切。DBに残してUIDで見分け、同期で再び取り込まないようにする
+ */
+export type TaskStatus = "todo" | "done" | "cancel_pending" | "dismissed";
 
 /** フィードから読み取った締切 */
 export interface FeedEvent {

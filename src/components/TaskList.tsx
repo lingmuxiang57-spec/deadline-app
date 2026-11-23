@@ -1,7 +1,15 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
-import { completeTask, deleteTask, keepTask, reopenTask, syncNow } from "@/app/actions";
+import {
+  completeTask,
+  deleteTask,
+  dismissTask,
+  keepTask,
+  reopenTask,
+  restoreTask,
+  syncNow,
+} from "@/app/actions";
 import { getDb } from "@/db/client";
 import { type TaskWithSource, getSources, getTaskBoard } from "@/db/queries";
 import { syncStaleSources } from "@/db/syncSources";
@@ -106,7 +114,11 @@ export async function TaskList() {
               now={now}
               leading={<CompleteButton id={task.id} />}
               below={<EstimatePicker taskId={task.id} current={null} />}
-              actions={<DeleteIfManual task={task} />}
+              actions={
+                <TaskButton action={dismissTask} id={task.id} variant="subtle" label={`「${task.title}」を削除`}>
+                  削除
+                </TaskButton>
+              }
             />
           ))}
         </Section>
@@ -137,6 +149,32 @@ export async function TaskList() {
             />
           ))}
         </Section>
+      )}
+
+      {board.dismissed.length > 0 && (
+        <details className="group text-sm">
+          <summary className="cursor-pointer list-none text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+            <span className="inline-block transition-transform group-open:rotate-90">›</span> 削除したもの（
+            {board.dismissed.length}件）
+          </summary>
+          <p className="mt-2 text-zinc-500">フィードから取り込んだ締切で、自分で削除したものです。同期しても戻りません。</p>
+          <ul className="mt-2 divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+            {board.dismissed.map((task) => (
+              <Row
+                key={task.id}
+                task={task}
+                today={today}
+                now={now}
+                done
+                actions={
+                  <TaskButton action={restoreTask} id={task.id}>
+                    戻す
+                  </TaskButton>
+                }
+              />
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );

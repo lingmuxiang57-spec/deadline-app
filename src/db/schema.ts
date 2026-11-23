@@ -8,7 +8,12 @@ import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { TaskStatus } from "../lib/sync"; // drizzle-kit から読むので "@/" ではなく相対パス
 
-export const TASK_STATUSES = ["todo", "done", "cancel_pending"] as const satisfies readonly TaskStatus[];
+export const TASK_STATUSES = [
+  "todo",
+  "done",
+  "cancel_pending",
+  "dismissed",
+] as const satisfies readonly TaskStatus[];
 
 /** 取り込み元のiCalフィード（K-LMS、Googleカレンダー） */
 export const sources = sqliteTable("sources", {
@@ -56,7 +61,9 @@ export const tasks = sqliteTable(
     // フィード由来なら source_id と external_uid の両方がある。手入力なら両方空
     check("tasks_source_uid_pair", sql`(${t.sourceId} IS NULL) = (${t.externalUid} IS NULL)`),
     check("tasks_estimate_positive", sql`${t.estimateMinutes} IS NULL OR ${t.estimateMinutes} > 0`),
-    check("tasks_status_valid", sql`${t.status} IN ('todo', 'done', 'cancel_pending')`),
+    check("tasks_status_valid", sql`${t.status} IN ('todo', 'done', 'cancel_pending', 'dismissed')`),
+    // 「削除済み」はフィード由来だけ（手入力はDBから消すので、この状態にしない）
+    check("tasks_dismissed_from_feed", sql`${t.status} <> 'dismissed' OR ${t.sourceId} IS NOT NULL`),
   ],
 );
 

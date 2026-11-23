@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { formatDateLabel, formatDeadline, formatEstimate, formatRelativeDay } from "@/lib/format";
+import {
+  formatDateLabel,
+  formatDateTime,
+  formatDeadline,
+  formatEstimate,
+  formatRelativeDay,
+  maskFeedUrl,
+} from "@/lib/format";
+
+describe("formatDateTime", () => {
+  it("日本時間の日時", () => {
+    expect(formatDateTime(new Date("2026-11-23T00:05:00Z"))).toBe("11/23(月) 9:05");
+  });
+});
+
+describe("maskFeedUrl", () => {
+  it("ホスト名だけ見せて、トークンを含むパスとクエリは伏せる", () => {
+    expect(maskFeedUrl("https://lms.example.jp/feeds/calendars/user_SECRET.ics?token=SECRET")).toBe(
+      "https://lms.example.jp/…",
+    );
+  });
+  it("URLとして読めなければ中身を出さない", () => {
+    expect(maskFeedUrl("not a url SECRET")).toBe("（URL）");
+  });
+});
 
 describe("formatDateLabel", () => {
   it("月/日(曜日)", () => {

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { QuickAdd } from "@/components/QuickAdd";
 import { TaskList } from "@/components/TaskList";
@@ -5,8 +6,11 @@ import { TaskList } from "@/components/TaskList";
 export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8 sm:py-12">
-      <header>
+      <header className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">今日やるべきこと</h1>
+        <Link href="/sources" className="shrink-0 text-sm text-blue-700 hover:underline dark:text-blue-300">
+          フィードの登録
+        </Link>
       </header>
       <QuickAdd />
       {/* 締切の一覧はリクエストごとに同期・読み出しする。見出しと入力欄は先に表示される */}

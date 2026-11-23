@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
 import { completeTask, deleteTask, keepTask, reopenTask, syncNow } from "@/app/actions";
@@ -42,6 +43,15 @@ export async function TaskList() {
           </form>
         )}
       </div>
+
+      {sources.length === 0 && (
+        <p className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
+          K-LMS や Google カレンダーを登録すると、締切を自動で取り込めます。{" "}
+          <Link href="/sources" className="font-medium underline">
+            フィードを登録する
+          </Link>
+        </p>
+      )}
 
       {failedSources.length > 0 && (
         <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">

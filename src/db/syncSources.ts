@@ -15,6 +15,14 @@ export type SyncResult =
   | { sourceId: number; ok: false; error: string };
 
 const UNEXPECTED_ERROR = "同期中に予期しないエラーが発生しました";
+const SOURCE_DELETED = "同期中にフィードが削除されました";
+
+/** 画面を開いたときの自動同期で、同じフィードを取りに行く最短間隔 */
+export const AUTO_SYNC_INTERVAL_MS = 5 * 60_000;
+
+// 失敗した試行も数えるため、最終同期日時（成功時のみ）とは別にプロセス内で覚えておく
+const globalForSync = globalThis as unknown as { __deadlineSyncAttempts?: Map<number, number> };
+const lastAttempts = (globalForSync.__deadlineSyncAttempts ??= new Map());
 
 export async function syncSource(
   db: Db,
@@ -26,6 +34,7 @@ export async function syncSource(
   if (!source) {
     throw new Error(`フィードが見つかりません: id=${sourceId}`);
   }
+  lastAttempts.set(sourceId, now.getTime());
 
   let events;
   try {
@@ -37,7 +46,12 @@ export async function syncSource(
     return { sourceId, ok: false, error: message };
   }
 
-  return db.transaction((tx) => {
+  return db.transaction((tx): SyncResult => {
+    // 取得している間に登録画面で削除されていたら、何も書き込まない
+    if (!tx.select({ id: sources.id }).from(sources).where(eq(sources.id, sourceId)).get()) {
+      return { sourceId, ok: false, error: SOURCE_DELETED };
+    }
+
     const existing: SyncedTask[] = tx
       .select({
         id: tasks.id,
@@ -76,20 +90,13 @@ export async function syncSource(
 
     return {
       sourceId,
-      ok: true as const,
+      ok: true,
       inserted: plan.inserts.length,
       updated: plan.updates.length,
       markedForCancel: plan.updates.filter((u) => u.changes.status === "cancel_pending").length,
     };
   });
 }
-
-/** 画面を開いたときの自動同期で、同じフィードを取りに行く最短間隔 */
-export const AUTO_SYNC_INTERVAL_MS = 5 * 60_000;
-
-// 失敗した試行も数えるため、最終同期日時（成功時のみ）とは別にプロセス内で覚えておく
-const globalForSync = globalThis as unknown as { __deadlineSyncAttempts?: Map<number, number> };
-const lastAttempts = (globalForSync.__deadlineSyncAttempts ??= new Map());
 
 /**
  * 前回の試行から minIntervalMs 以上たったフィードだけ同期する。
@@ -107,6 +114,7 @@ export async function syncStaleSources(
     .all()
     .filter(({ id }) => now.getTime() - (lastAttempts.get(id) ?? -Infinity) >= minIntervalMs);
 
+  // 取得を待っている間に同じフィードをもう一度取りに行かないよう、始める前に記録する
   for (const { id } of due) lastAttempts.set(id, now.getTime());
   return Promise.all(due.map(({ id }) => syncSource(db, id, now, fetchOptions)));
 }
@@ -123,6 +131,5 @@ export async function syncAllSources(
   fetchOptions?: FetchIcsOptions,
 ): Promise<SyncResult[]> {
   const ids = db.select({ id: sources.id }).from(sources).all();
-  for (const { id } of ids) lastAttempts.set(id, now.getTime());
   return Promise.all(ids.map(({ id }) => syncSource(db, id, now, fetchOptions)));
 }

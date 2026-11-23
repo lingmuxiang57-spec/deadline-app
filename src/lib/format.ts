@@ -23,6 +23,24 @@ export function formatDeadline(deadline: Date): string {
   return `${label} ${hour}:${String(minute).padStart(2, "0")}`;
 }
 
+/** 日時の表示。例: "11/23(月) 9:05" */
+export function formatDateTime(date: Date): string {
+  const { hour, minute } = toWallTime(date);
+  return `${formatDateLabel(toDateKey(date))} ${hour}:${String(minute).padStart(2, "0")}`;
+}
+
+/**
+ * iCal URLの表示用。URL自体が認証トークンなので、ホスト名だけ見せて残りは伏せる。
+ * 例: "https://lms.example.jp/feeds/calendars/user_abc.ics" → "https://lms.example.jp/…"
+ */
+export function maskFeedUrl(url: string): string {
+  try {
+    return `${new URL(url).origin}/…`;
+  } catch {
+    return "（URL）";
+  }
+}
+
 /** 今日から見た日付の近さ。例: "今日", "明日", "あと5日", "昨日", "3日前" */
 export function formatRelativeDay(today: DateKey, target: DateKey): string {
   const days = diffDays(today, target);

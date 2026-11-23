@@ -90,6 +90,24 @@ describe("parseIcs: 日時の読み取り", () => {
     `);
     expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-12-05T14:59:00.000Z");
   });
+
+  it("K-LMS の実フィードの形式: VALUE=DATE が二重に付いた終日の予定も読める", () => {
+    const ics = calendar(`
+      UID:klms-event
+      SUMMARY:休講
+      DTSTART;VALUE=DATE;VALUE=DATE:20261205
+    `);
+    expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-12-05T14:59:00.000Z");
+  });
+
+  it("K-LMS の実フィードの形式: 課題の締切は UTC（07:00Z = 日本時間 16:00）", () => {
+    const ics = calendar(`
+      UID:klms-assignment
+      SUMMARY:課題
+      DTSTART:20261127T070000Z
+    `);
+    expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-11-27T07:00:00.000Z");
+  });
 });
 
 describe("parseIcs: 件名・UID・状態", () => {
@@ -338,5 +356,34 @@ describe("syncFeed", () => {
     });
     expect(plan.inserts.map((e) => e.title)).toEqual(["新しい課題"]);
     expect(plan.updates).toEqual([{ id: 1, changes: { status: "cancel_pending" } }]);
+  });
+});
+
+describe("fetchIcs（実際の HTTP 通信）", () => {
+  it("手元の HTTP サーバーから取得できる。応答がなければ時間切れで SyncError(network)", async () => {
+    const { createServer } = await import("node:http");
+    const body = calendar(`
+      UID:real
+      SUMMARY:本物の通信
+      DTSTART:20261204T145900Z
+    `);
+    const server = createServer((req, res) => {
+      if (req.url === "/slow.ics") return; // 応答しない
+      res.writeHead(200, { "Content-Type": "text/calendar" });
+      res.end(body);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    try {
+      const text = await fetchIcs(`http://127.0.0.1:${port}/feed.ics`);
+      expect(parseIcs(text).map((e) => e.title)).toEqual(["本物の通信"]);
+
+      await expect(
+        fetchIcs(`http://127.0.0.1:${port}/slow.ics`, { timeoutMs: 200 }),
+      ).rejects.toMatchObject({ kind: "network" });
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

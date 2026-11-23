@@ -288,3 +288,32 @@ describe("getTaskBoard", () => {
     expect(board.doneToday.map((t) => t.title)).toEqual(["今日完了"]);
   });
 });
+
+describe("syncSource の細かい場合", () => {
+  it("取得している間にフィードが削除されたら何も書き込まない", async () => {
+    const source = addSource();
+    const ics = calendar({ uid: "a", title: "レポート", start: "20261204T145900Z" });
+    const result = await syncSource(db, source.id, now, {
+      fetch: async () => {
+        db.delete(sources).where(eq(sources.id, source.id)).run(); // 取得中に登録画面で削除された
+        return new Response(ics);
+      },
+    });
+    expect(result).toEqual({ sourceId: source.id, ok: false, error: "同期中にフィードが削除されました" });
+    expect(db.select().from(tasks).all()).toEqual([]);
+  });
+
+  it("個別に同期したフィードは、自動同期の間隔のあいだ取りに行かない", async () => {
+    const source = addSource();
+    let calls = 0;
+    const fetchOptions = {
+      fetch: async () => {
+        calls++;
+        return new Response(calendar());
+      },
+    };
+    await syncSource(db, source.id, now, fetchOptions); // 登録画面での取り込み
+    await syncStaleSources(db, new Date(now.getTime() + 60_000), { fetchOptions }); // 直後にトップを開く
+    expect(calls).toBe(1);
+  });
+});

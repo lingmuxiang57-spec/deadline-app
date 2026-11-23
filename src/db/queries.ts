@@ -1,7 +1,7 @@
 /**
  * 画面表示用の読み出し。
  */
-import { asc, eq } from "drizzle-orm";
+import { asc, count, eq } from "drizzle-orm";
 import { jstDateTime, toDateKey } from "@/lib/date";
 import type { Db } from "./client";
 import { type Source, type Task, sources, tasks } from "./schema";
@@ -36,4 +36,18 @@ export function getTaskBoard(db: Db, now: Date): TaskBoard {
 
 export function getSources(db: Db): Source[] {
   return db.select().from(sources).orderBy(asc(sources.id)).all();
+}
+
+export type SourceWithCount = Source & { taskCount: number };
+
+/** 登録画面用。削除するとき一緒に消える締切の件数を添える */
+export function getSourcesWithTaskCount(db: Db): SourceWithCount[] {
+  return db
+    .select({ source: sources, taskCount: count(tasks.id) })
+    .from(sources)
+    .leftJoin(tasks, eq(tasks.sourceId, sources.id))
+    .groupBy(sources.id)
+    .orderBy(asc(sources.id))
+    .all()
+    .map(({ source, taskCount }) => ({ ...source, taskCount }));
 }

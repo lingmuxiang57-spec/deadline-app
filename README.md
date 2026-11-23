@@ -84,6 +84,8 @@ iCalはサーバーが画面を開いたときに取得し、手入力分と合�
 │   │   ├── layout.tsx
 │   │   ├── page.tsx           # 今日やるべきリスト（開いたときに同期）
 │   │   ├── actions.ts         # 手入力・所要時間・完了・取り消し確認の書き込み
+│   │   ├── calendar/
+│   │   │   └── page.tsx       # 着手すべき日のタイムライン（?weeks=2|4|8）
 │   │   └── sources/
 │   │       ├── page.tsx       # iCalフィードの登録・削除
 │   │       └── actions.ts
@@ -93,7 +95,10 @@ iCalはサーバーが画面を開いたときに取得し、手入力分と合�
 │   │   ├── EstimatePicker.tsx # 所要時間7択
 │   │   ├── PendingButton.tsx  # 送信中は押せなくするボタン
 │   │   ├── AddSourceForm.tsx  # フィードの登録（登録と同時に取り込む）
-│   │   └── SourceList.tsx     # 登録済みフィード（URLはホスト名だけ表示）
+│   │   ├── SourceList.tsx     # 登録済みフィード（URLはホスト名だけ表示）
+│   │   ├── TaskTimeline.tsx   # タイムライン（帯 = 着手すべき日〜締切の前日、◆ = 締切）
+│   │   ├── SiteNav.tsx        # リスト／カレンダー／フィードの切り替え
+│   │   └── layout.ts          # トップページの2列の列幅
 │   ├── db/
 │   │   ├── schema.ts          # sources / tasks（Drizzle）
 │   │   ├── client.ts          # 接続と起動時のマイグレーション
@@ -104,6 +109,8 @@ iCalはサーバーが画面を開いたときに取得し、手入力分と合�
 │   └── lib/                   # アプリの中心ロジック（画面やDBに依存しない）
 │       ├── date.ts            # 日本時間への変換・日付計算
 │       ├── format.ts          # 画面表示用の書式（12/5(土)、あと3日 など）
+│       ├── urgency.ts         # 急ぎ具合（締切超過・今日明日・着手の遅れ）
+│       ├── timeline.ts        # タイムラインの配置計算
 │       ├── priority.ts        # 着手期限の計算と並べ替え
 │       ├── parseQuickAdd.ts   # 「ゼミ発表資料 12/5」→ 件名＋締切
 │       └── sync.ts            # iCal取得・UID照合・取り消し検出
@@ -113,6 +120,8 @@ iCalはサーバーが画面を開いたときに取得し、手入力分と合�
     ├── parseQuickAdd.test.ts
     ├── sync.test.ts
     ├── format.test.ts
+    ├── urgency.test.ts
+    ├── timeline.test.ts
     ├── db.test.ts             # メモリ上のSQLiteで制約と同期を確かめる
     └── sources.test.ts
 ```

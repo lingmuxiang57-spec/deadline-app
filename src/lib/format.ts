@@ -41,6 +41,29 @@ export function maskFeedUrl(url: string): string {
   }
 }
 
+/**
+ * K-LMS（Canvas）の件名は「課題名 [授業名]」の形で届き、授業名の中にも「[火2]」のような括弧が入る。
+ * 末尾の対応する [ … ] を授業名として切り離す。括弧の対応が取れなければ、そのまま件名として返す。
+ *   "課題レポート７ [[火2]杉浦 壽彦　機械系の動力学]" → { title: "課題レポート７", course: "[火2]杉浦 壽彦　機械系の動力学" }
+ */
+export function splitCourseSuffix(fullTitle: string): { title: string; course: string | null } {
+  const trimmed = fullTitle.trim();
+  if (!trimmed.endsWith("]")) return { title: trimmed, course: null };
+
+  let depth = 0;
+  for (let i = trimmed.length - 1; i >= 0; i--) {
+    if (trimmed[i] === "]") depth++;
+    else if (trimmed[i] === "[") depth--;
+    if (depth === 0) {
+      const title = trimmed.slice(0, i).trim();
+      const course = trimmed.slice(i + 1, -1).trim();
+      // 件名がすべて括弧（例: "[重要]"）なら切り離さない
+      return title === "" || course === "" ? { title: trimmed, course: null } : { title, course };
+    }
+  }
+  return { title: trimmed, course: null };
+}
+
 /** 今日から見た日付の近さ。例: "今日", "明日", "あと5日", "昨日", "3日前" */
 export function formatRelativeDay(today: DateKey, target: DateKey): string {
   const days = diffDays(today, target);

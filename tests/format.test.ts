@@ -6,7 +6,28 @@ import {
   formatEstimate,
   formatRelativeDay,
   maskFeedUrl,
+  splitCourseSuffix,
 } from "@/lib/format";
+
+describe("splitCourseSuffix（K-LMS の件名から授業名を切り離す）", () => {
+  it.each([
+    [
+      "課題レポート７ [[火2]杉浦 壽彦　機械系の動力学]",
+      { title: "課題レポート７", course: "[火2]杉浦 壽彦　機械系の動力学" },
+    ],
+    [
+      "卒業研究要旨（仮提出）：第7班 [[他]深潟 康二　卒業研究]",
+      { title: "卒業研究要旨（仮提出）：第7班", course: "[他]深潟 康二　卒業研究" },
+    ],
+    ["レポート [統計学]", { title: "レポート", course: "統計学" }],
+  ])("%s", (input, expected) => {
+    expect(splitCourseSuffix(input)).toEqual(expected);
+  });
+
+  it.each(["GM資料", "[重要] 面接", "[重要]", "壊れた ]括弧]", "空の授業名 []"])("切り離さない: %s", (input) => {
+    expect(splitCourseSuffix(input)).toEqual({ title: input, course: null });
+  });
+});
 
 describe("formatDateTime", () => {
   it("日本時間の日時", () => {

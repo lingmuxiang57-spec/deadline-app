@@ -1,4 +1,9 @@
-@import "tailwindcss";
+/*
+ * クラス名を探すのは src/ の中だけにする。
+ * 既定ではプロジェクト全体を読むため、SQLite が使用中の data/app.db-shm（Windows ではロックされる）を
+ * 読もうとして Turbopack ごと止まってしまう。
+ */
+@import "tailwindcss" source("../");
 
 @theme inline {
   /* Geist は欧文のみなので、日本語は OS の日本語フォントで表示する */

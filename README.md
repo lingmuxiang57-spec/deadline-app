@@ -1,36 +1,189 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 締切を1か所に集め、「今日やるべき順」に並べるWebアプリ 設計書
 
-## Getting Started
+最終更新: 2026-11-23
 
-First, run the development server:
+## 概要
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+テーマ自由でアプリを1つ作り、公開GitHubリポジトリのURLを約2週間で提出する。評価は見た目や機能数ではなく「なぜこれを作ったのか」を自分の言葉で語れるかで決まる。
+
+| 項目 | 課題PDFの指定 |
+| --- | --- |
+| 作るもの | アプリ1つ（Web・スマホ・業務ツール等、形式・規模・技術は自由。生成AI利用可） |
+| 提出物 | GitHubリポジトリURL（Public）。APIキー・パスワード等の秘密情報は含めない |
+| 期限 | 目安2週間後 |
+| 面接で話すこと | 解決したい課題（誰の・どんな困りごと・選んだ理由）／アプリのデモ／工夫したポイント（こだわり・迷って決めたこと・あえてやらなかったこと） |
+| 評価軸 | 問いを立てる力／論理的思考力（AIに頼りすぎず自分で考えているか）／判断を言葉にする力 |
+
+この設計書は面接の3点にそのまま対応させる。課題設定と判断の理由は本人の言葉で書く。
+
+## 解決したい課題
+
+| 問い | 回答 |
+| --- | --- |
+| 誰が困っているか（具体的な1人を思い浮かべる） |  |
+| どんな場面で、何に困っているか |  |
+| 今はどうやってしのいでいるか（既存の代替手段） |  |
+| その方法の何が不十分か |  |
+| なぜこの課題を選んだか（自分との接点・他候補を捨てた理由） |  |
+| 解決できたと言える状態（成功の基準） |  |
+
+## 解決策とシステム構成
+
+LMSとGoogleカレンダーのiCalフィードを自動で取り込み、Slack・LINE・メール由来の締切は1行で手入力する。各締切に所要時間を付け、「着手すべき日」が早い順に今日のリストを出す。
+
+| 区分 | 内容 | 理由 |
+| --- | --- | --- |
+| やること | iCalフィードの登録と取り込み（K-LMS、Googleカレンダー） | 自分の締切の大半がここにあり、公式の取得手段がある |
+| やること | 1行での手入力（例：「ゼミ発表資料 12/5」） | LINE等、自動化できない経路が残るため必須 |
+| やること | 所要時間のワンタップ入力（30分／2時間／半日／1日／2日／3日／1週間） | 取り込めるのは日付だけで、並べ替えに所要時間が要る |
+| やること | 「今日やるべき順」のリストと完了チェック | アプリの中心。これがないとただのカレンダー |
+| あえてやらない | メール・Slackの自動抽出 | OAuth・文面解析のコストが大きく、LINEはそもそも不可。手入力の速さに集中する |
+| あえてやらない | 通知・定期の自動同期 | 開いたときに同期すれば足りる。必要性は使ってみて判断 |
+| あえてやらない | 複数ユーザー・ログイン | まず自分一人の課題を解く |
+| 形式 | Webアプリ（PC・スマホのブラウザ） | インストール不要でデモしやすい |
+| 技術スタック | Next.js（App Router、サーバー兼画面）＋ SQLite ＋ Drizzle ORM | iCalはブラウザから直接取得できない（CORS）ためサーバー側が必要。SQLiteはファイル1つで動き、一人用のデータ量に十分。DrizzleはスキーマをTypeScriptで書け、SQLに近く中身を説明しやすい |
+| 秘密情報 | iCal URLはリポジトリに含めない | URL自体が認証トークン。知られると課題一覧が読める |
+
+### 構成
+
+```mermaid
+flowchart LR
+    subgraph src["自動取り込み元（iCal）<br/>URLは認証トークン扱い・リポジトリに含めない"]
+        klms["K-LMS<br/>課題の締切"]
+        gcal["Googleカレンダー<br/>バイト・就活の予定"]
+    end
+    server["サーバー（Next.js）<br/>iCalを取得・解析<br/>UIDで照合して保存<br/>着手期限で並べ替え"]
+    db[("SQLite<br/>sources / tasks")]
+    browser["ブラウザ<br/>今日やるべきリスト<br/>1行入力・所要時間<br/>完了チェック"]
+    me["自分<br/>Slack・LINE・メールの<br/>締切を手入力"]
+
+    klms -- 取得 --> server
+    gcal -- 取得 --> server
+    server <-- 読み書き --> db
+    browser -- 入力 --> server
+    server -- リスト --> browser
+    me --> browser
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+iCalはサーバーが画面を開いたときに取得し、手入力分と合わせて着手期限順に並べてブラウザに返す。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### ディレクトリ構成
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+.
+├── README.md                  # 設計書（このファイル）
+├── .env.example               # 必要な環境変数の見本（DBの保存場所など。iCal URLは書かない）
+├── .gitignore                 # .env と data/*.db を除外
+├── package.json
+├── drizzle.config.ts
+├── drizzle/                   # マイグレーションSQL（npm run db:generate で生成。起動時に自動で適用）
+├── data/
+│   └── .gitkeep               # SQLiteファイルの置き場所（中身はgit管理外）
+├── src/
+│   ├── app/
+│   │   ├── layout.tsx
+│   │   ├── page.tsx           # 今日やるべきリスト（開いたときに同期）
+│   │   ├── actions.ts         # 手入力・所要時間・完了・取り消し確認の書き込み
+│   │   └── sources/
+│   │       ├── page.tsx       # iCalフィードの登録・削除
+│   │       └── actions.ts
+│   ├── components/
+│   │   ├── TaskList.tsx       # 「今日やる」「見積もりを入れて」「取り消された？」の各欄
+│   │   ├── QuickAdd.tsx       # 1行入力（入力中に件名・締切をプレビュー）
+│   │   ├── EstimatePicker.tsx # 所要時間7択
+│   │   └── PendingButton.tsx  # 送信中は押せなくするボタン
+│   ├── db/
+│   │   ├── schema.ts          # sources / tasks（Drizzle）
+│   │   ├── client.ts          # 接続と起動時のマイグレーション
+│   │   ├── queries.ts         # 画面表示用の読み出し
+│   │   ├── mutations.ts       # 締切の書き込み（状態の遷移を制限）
+│   │   └── syncSources.ts     # 同期の計画をDBに反映（自動同期は5分に1回まで）
+│   └── lib/                   # アプリの中心ロジック（画面やDBに依存しない）
+│       ├── date.ts            # 日本時間への変換・日付計算
+│       ├── format.ts          # 画面表示用の書式（12/5(土)、あと3日 など）
+│       ├── priority.ts        # 着手期限の計算と並べ替え
+│       ├── parseQuickAdd.ts   # 「ゼミ発表資料 12/5」→ 件名＋締切
+│       └── sync.ts            # iCal取得・UID照合・取り消し検出
+└── tests/
+    ├── date.test.ts
+    ├── priority.test.ts
+    ├── parseQuickAdd.test.ts
+    ├── sync.test.ts
+    └── db.test.ts             # メモリ上のSQLiteで制約と同期を確かめる
+```
 
-## Learn More
+- 中心ロジックは `src/lib/` に画面・DBから切り離した関数として置き、並べ方の規則をテストで確かめる
+- 書き込みはAPI Routesではなく Server Actions で行う。自分しか使わないため外部向けAPIは不要
+- iCal URLは画面から登録してDBに保存し、DBファイルごと `.gitignore` で除外する
+- iCalの日時はUTCで届くことが多いため、「今日」「締切日」の判定は日本時間（Asia/Tokyo）に直してから行う
 
-To learn more about Next.js, take a look at the following resources:
+### 並べ方のロジック
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1日に使える作業時間を8時間とみなし、所要時間を日数に直して締切から引いた「着手期限」が早い順に並べる。着手期限が今日以前のものを「今日やる」として上に出す。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+必要日数 = ⌈所要時間（時間）÷ 8⌉
+着手期限 = 締切日 − 必要日数
+```
 
-## Deploy on Vercel
+| 所要時間の選択肢 | 時間換算 | 必要日数 | 締切 12/5 の場合の着手期限 |
+| --- | --- | --- | --- |
+| 30分 | 0.5時間 | 1日 | 12/4 |
+| 2時間 | 2時間 | 1日 | 12/4 |
+| 半日 | 4時間 | 1日 | 12/4 |
+| 1日 | 8時間 | 1日 | 12/4 |
+| 2日 | 16時間 | 2日 | 12/3 |
+| 3日 | 24時間 | 3日 | 12/2 |
+| 1週間 | 56時間 | 7日 | 11/28 |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- 締切日当日は作業日に数えない（締切が朝や授業前のことが多いため）
+- 授業やバイトの有無による日ごとの差は考慮しない（1日一律8時間）
+- 所要時間が未入力の締切は「見積もりを入れて」欄に分け、順位を付けない
+- 着手期限が同じものは締切が早い順、それも同じなら所要時間が長い順
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### データ設計
+
+| テーブル | 主な項目 | 役割 |
+| --- | --- | --- |
+| sources | id, 名前, iCal URL, 最終同期日時, 最後の同期エラー | 取り込み元のフィード（K-LMS、Googleカレンダー） |
+| tasks | id, source_id（手入力なら空）, external_uid, 件名, 締切, 所要時間（分）, 状態（未着手／完了／取り消し確認）, 残す（取り消し確認で「残す」を選んだか） | 締切そのもの |
+
+- 再同期では iCal の UID（external_uid）で既存の締切と照合し、件名と締切だけ更新する。自分で入れた所要時間と完了状態は上書きしない
+- フィードから消えた締切は自動では消さず、状態を「取り消し確認」にしてリスト上で「取り消された？」と表示する。自分で「削除」か「残す」を選ぶ
+- 「残す」を選んだ締切は、以後フィードになくても「取り消し確認」に戻さない。フィードとのつながり（external_uid）は保つので、後でフィードに戻ってきても二重に取り込まず、件名・締切の変更は反映する
+- 繰り返し予定（毎週のバイトなど）は取り込まない
+- フィードを削除すると、そのフィード由来の締切も一緒に消える（手入力の締切は残る）
+- 同期に失敗したフィードは「最後の同期エラー」に理由を記録し、他のフィードの同期や画面表示は止めない。エラー文にiCal URLは含めない
+- 日時はUNIXミリ秒の整数で保存し、日本時間への変換はアプリ側（`src/lib/date.ts`）で行う
+- 「source_idとexternal_uidは両方あるか両方空」「所要時間は正の数」「同じフィードに同じUIDは1件」をDBの制約で守る
+- ただし締切が過去の締切はフィードから自然に消えることがあるため、締切が未来のものだけを「取り消し確認」の対象にする（要確認：K-LMSのフィードに過去の課題がどこまで含まれるか）
+
+## 判断ログ
+
+迷ったことはその場でここに記録する。面接の「工夫したポイント（迷った末に決めたこと・あえてやらなかったこと）」はこの表から話せる。
+
+| 日付 | 論点 | 検討した選択肢 | 決めたこと | 理由 |
+| --- | --- | --- | --- | --- |
+| 2026-11-23 | フィードを削除したときの締切 | 一緒に消す／手入力扱いにして残す | 一緒に消す | （自分の言葉で） |
+| 2026-11-23 | 繰り返し予定の扱い | 先90日分を展開して取り込む／取り込まない | 取り込まない | （自分の言葉で） |
+| 2026-11-23 | 「残す」を選んだ締切の次回同期 | 毎回確認し直す／フィードとのつながりを外して手入力扱いにする／「残す」の印を付けて以後確認しない | 「残す」の印を付けて以後確認しない | （自分の言葉で）。つながりを外す案は、フィードに戻ってきたとき二重に取り込まれるため採らなかった |
+| 2026-11-23 | DBの操作方法 | Drizzle ORM／Prisma／better-sqlite3で生SQL | Drizzle ORM | （自分の言葉で） |
+| 2026-11-23 | 所要時間の選択肢 | 30分〜1日の4択／2日・3日・1週間を追加 | 2日・3日・1週間を追加して7択 | 1日8時間換算だと4択はすべて必要日数1日になり、着手期限に差が出ないため |
+| 2026-11-23 | LMSで消えた課題 | 自動で削除／確認表示 | 「取り消された？」と確認表示し、自分で削除か残すかを選ぶ | （自分の言葉で） |
+| 2026-11-23 | 1日の作業時間 | 考慮しない／一律で数える／日ごとに設定 | 1日一律8時間として所要時間を日数に換算 | （自分の言葉で） |
+| 2026-11-23 | 技術スタック | （他に検討した候補を自分で） | サーバーはNext.js、データベースはSQLite | （自分の言葉で） |
+| 2026-11-23 | 自動連携の範囲 | 全経路を自動化／iCalだけ自動化し残りは手入力 | K-LMSとGoogleカレンダーはiCalで自動、Slack・LINE・メールは1行手入力 | LINEは自動化できず手入力は結局必要。2週間をiCalと手入力の速さに集中。K-LMSにカレンダーフィードがあることを確認済み |
+| 2026-11-23 | 並べ方 | 締切が近い順／締切と所要時間から逆算／締切×重要度スコア | 締切と所要時間から逆算した「着手すべき日」順 | （自分の言葉で） |
+| 2026-11-23 | 入力方法 | 手入力を速く／テキスト貼り付けでAI抽出／LMS等と自動連携 | LMS等と自動連携 | （自分の言葉で） |
+| 2026-11-23 | 集める対象 | LMS／Slack・LINE・メール／口頭連絡／バイト・就活 | LMS、Slack・LINE・メール、バイト・就活 | 自分の締切が実際に届く場所 |
+| 2026-11-23 | テーマ | 締切の一元管理／扶養控除の年収見込み／立替精算／就活選考管理／食材の使い切り／発表の想定質問 | 締切を1か所に集め、「今日やるべき順」に並べるWebアプリ | （自分の言葉で：実際に締切を見落とした場面など） |
+
+## 未決事項
+
+- [ ] 課題の受領日と提出日（「2週間後」の起点）
+- [ ] 「解決したい課題」の表を埋める
+- [x] 技術スタックを決める → Next.js ＋ SQLite
+- [x] 1日に使える作業時間を考慮するか → 1日一律8時間
+- [x] LMSで取り消された課題の扱い → 確認表示
+- [ ] K-LMSのフィードに過去の課題がどこまで含まれるか確認する
+- [ ] 提出前確認：リポジトリPublic、秘密情報なし、READMEに課題・起動手順・デモ方法

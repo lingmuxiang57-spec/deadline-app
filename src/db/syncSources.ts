@@ -38,7 +38,7 @@ export async function syncSource(
 
   let events;
   try {
-    events = parseIcs(await fetchIcs(source.url, fetchOptions));
+    events = parseIcs(await fetchIcs(source.url, fetchOptions), now);
   } catch (error) {
     // SyncError 以外のメッセージにはURLが混ざるおそれがあるので、そのまま出さない
     const message = error instanceof SyncError ? error.message : UNEXPECTED_ERROR;

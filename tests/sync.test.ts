@@ -7,6 +7,7 @@ import {
   normalizeFeedUrl,
   parseIcs,
   planSync,
+  seriesUidOf,
   syncFeed,
 } from "@/lib/sync";
 
@@ -44,7 +45,7 @@ describe("parseIcs: 日時の読み取り", () => {
       SUMMARY:レポート課題
       DTSTART:20261204T145900Z
     `);
-    expect(iso(parseIcs(ics))).toEqual([
+    expect(iso(parseIcs(ics, now))).toEqual([
       { uid: "assignment-1", title: "レポート課題", at: "2026-12-04T14:59:00.000Z" },
     ]);
   });
@@ -55,7 +56,7 @@ describe("parseIcs: 日時の読み取り", () => {
       SUMMARY:面接
       DTSTART;TZID=Asia/Tokyo:20261205T090000
     `);
-    expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-12-05T00:00:00.000Z");
+    expect(parseIcs(ics, now)[0].deadline.toISOString()).toBe("2026-12-05T00:00:00.000Z");
   });
 
   it("タイムゾーンなし（浮動時刻）は日本時間として読む", () => {
@@ -63,7 +64,7 @@ describe("parseIcs: 日時の読み取り", () => {
       UID:floating
       DTSTART:20261205T090000
     `);
-    expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-12-05T00:00:00.000Z");
+    expect(parseIcs(ics, now)[0].deadline.toISOString()).toBe("2026-12-05T00:00:00.000Z");
   });
 
   it("VTIMEZONE のない TZID は IANA 名として読む", () => {
@@ -71,7 +72,7 @@ describe("parseIcs: 日時の読み取り", () => {
       UID:ny
       DTSTART;TZID=America/New_York:20261205T090000
     `);
-    expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-12-05T14:00:00.000Z");
+    expect(parseIcs(ics, now)[0].deadline.toISOString()).toBe("2026-12-05T14:00:00.000Z");
   });
 
   it("知らない TZID は日本時間として読む", () => {
@@ -79,7 +80,7 @@ describe("parseIcs: 日時の読み取り", () => {
       UID:unknown-tz
       DTSTART;TZID=Custom Zone:20261205T090000
     `);
-    expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-12-05T00:00:00.000Z");
+    expect(parseIcs(ics, now)[0].deadline.toISOString()).toBe("2026-12-05T00:00:00.000Z");
   });
 
   it("終日の予定はその日の 23:59（日本時間）", () => {
@@ -88,7 +89,7 @@ describe("parseIcs: 日時の読み取り", () => {
       SUMMARY:ES締切
       DTSTART;VALUE=DATE:20261205
     `);
-    expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-12-05T14:59:00.000Z");
+    expect(parseIcs(ics, now)[0].deadline.toISOString()).toBe("2026-12-05T14:59:00.000Z");
   });
 
   it("K-LMS の実フィードの形式: VALUE=DATE が二重に付いた終日の予定も読める", () => {
@@ -97,7 +98,7 @@ describe("parseIcs: 日時の読み取り", () => {
       SUMMARY:休講
       DTSTART;VALUE=DATE;VALUE=DATE:20261205
     `);
-    expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-12-05T14:59:00.000Z");
+    expect(parseIcs(ics, now)[0].deadline.toISOString()).toBe("2026-12-05T14:59:00.000Z");
   });
 
   it("K-LMS の実フィードの形式: 課題の締切は UTC（07:00Z = 日本時間 16:00）", () => {
@@ -106,7 +107,7 @@ describe("parseIcs: 日時の読み取り", () => {
       SUMMARY:課題
       DTSTART:20261127T070000Z
     `);
-    expect(parseIcs(ics)[0].deadline.toISOString()).toBe("2026-11-27T07:00:00.000Z");
+    expect(parseIcs(ics, now)[0].deadline.toISOString()).toBe("2026-11-27T07:00:00.000Z");
   });
 });
 
@@ -116,7 +117,7 @@ describe("parseIcs: 件名・UID・状態", () => {
       UID:no-title
       DTSTART:20261204T145900Z
     `);
-    expect(parseIcs(ics)[0].title).toBe("（無題）");
+    expect(parseIcs(ics, now)[0].title).toBe("（無題）");
   });
 
   it("UID のない予定は照合できないので読み飛ばす", () => {
@@ -124,7 +125,7 @@ describe("parseIcs: 件名・UID・状態", () => {
       SUMMARY:UIDなし
       DTSTART:20261204T145900Z
     `);
-    expect(parseIcs(ics)).toEqual([]);
+    expect(parseIcs(ics, now)).toEqual([]);
   });
 
   it("STATUS:CANCELLED の予定は読み飛ばす", () => {
@@ -133,7 +134,7 @@ describe("parseIcs: 件名・UID・状態", () => {
       STATUS:CANCELLED
       DTSTART:20261204T145900Z
     `);
-    expect(parseIcs(ics)).toEqual([]);
+    expect(parseIcs(ics, now)).toEqual([]);
   });
 
   it("過去の単発の予定も返す（追加するかは planSync が決める）", () => {
@@ -141,49 +142,124 @@ describe("parseIcs: 件名・UID・状態", () => {
       UID:past
       DTSTART:20261101T145900Z
     `);
-    expect(parseIcs(ics)).toHaveLength(1);
+    expect(parseIcs(ics, now)).toHaveLength(1);
   });
 
   it("壊れた本文は SyncError(parse)", () => {
-    expect(() => parseIcs("BEGIN:VCALENDAR\r\nBROKEN")).toThrow(SyncError);
+    expect(() => parseIcs("BEGIN:VCALENDAR\r\nBROKEN", now)).toThrow(SyncError);
   });
 });
 
-describe("parseIcs: 繰り返し予定は取り込まない", () => {
-  const single = `
-    UID:es
-    SUMMARY:ES締切
-    DTSTART;TZID=Asia/Tokyo:20261205T120000
+describe("parseIcs: 繰り返し予定は直近の1回だけ", () => {
+  // now = 2026-11-23（月）10:00 JST
+  const weekly = (extra = "") => `
+    UID:baito
+    SUMMARY:バイト
+    DTSTART;TZID=Asia/Tokyo:20261116T180000
+    RRULE:FREQ=WEEKLY
+    ${extra}
   `;
 
-  it("RRULE の予定（毎週のバイトなど）は読み飛ばす", () => {
-    const weekly = `
-      UID:baito
-      SUMMARY:バイト
-      DTSTART;TZID=Asia/Tokyo:20261116T180000
-      RRULE:FREQ=WEEKLY
+  it("毎週の締切（GM資料）は、これから来る最初の1回を「UID#その回の日時」で返す", () => {
+    const gm = `
+      UID:gm
+      SUMMARY:GM資料
+      DTSTART;TZID=Asia/Tokyo:20261130T100000
+      DTEND;TZID=Asia/Tokyo:20261130T120000
+      RRULE:FREQ=WEEKLY;UNTIL=20270125T145959Z
     `;
-    expect(parseIcs(calendar(weekly, single)).map((e) => e.externalUid)).toEqual(["es"]);
+    expect(iso(parseIcs(calendar(gm), now))).toEqual([
+      { uid: "gm#2026-11-30T01:00:00.000Z", title: "GM資料", at: "2026-11-30T01:00:00.000Z" },
+    ]);
   });
 
-  it("RDATE の予定も読み飛ばす", () => {
+  it("過去から続く繰り返しは、今より後の回（今日の夕方）を返す", () => {
+    expect(iso(parseIcs(calendar(weekly()), now))).toEqual([
+      { uid: "baito#2026-11-23T09:00:00.000Z", title: "バイト", at: "2026-11-23T09:00:00.000Z" },
+    ]);
+  });
+
+  it("除外日（EXDATE）の回は飛ばす", () => {
+    const events = parseIcs(calendar(weekly("EXDATE;TZID=Asia/Tokyo:20261123T180000")), now);
+    expect(events.map((e) => e.externalUid)).toEqual(["baito#2026-11-30T09:00:00.000Z"]);
+  });
+
+  it("その回だけ時間を変えたら、IDは本来の日時のまま、締切と件名は変えた後のもの", () => {
+    const moved = `
+      UID:baito
+      RECURRENCE-ID;TZID=Asia/Tokyo:20261123T180000
+      SUMMARY:バイト（時間変更）
+      DTSTART;TZID=Asia/Tokyo:20261123T200000
+    `;
+    expect(iso(parseIcs(calendar(weekly(), moved), now))).toEqual([
+      { uid: "baito#2026-11-23T09:00:00.000Z", title: "バイト（時間変更）", at: "2026-11-23T11:00:00.000Z" },
+    ]);
+  });
+
+  it("その回だけ取り消されたら、次の回を返す", () => {
+    const cancelled = `
+      UID:baito
+      RECURRENCE-ID;TZID=Asia/Tokyo:20261123T180000
+      STATUS:CANCELLED
+      DTSTART;TZID=Asia/Tokyo:20261123T180000
+    `;
+    const events = parseIcs(calendar(weekly(), cancelled), now);
+    expect(events.map((e) => e.externalUid)).toEqual(["baito#2026-11-30T09:00:00.000Z"]);
+  });
+
+  it("繰り返しが終わっていれば何も返さない", () => {
+    const ended = `
+      UID:old
+      DTSTART;TZID=Asia/Tokyo:20261001T100000
+      RRULE:FREQ=WEEKLY;COUNT=3
+    `;
+    expect(parseIcs(calendar(ended), now)).toEqual([]);
+  });
+
+  it("RDATE の予定も直近の1回だけ", () => {
     const rdate = `
       UID:seminar
       SUMMARY:ゼミ
       DTSTART;TZID=Asia/Tokyo:20261201T130000
       RDATE;TZID=Asia/Tokyo:20261208T130000
     `;
-    expect(parseIcs(calendar(rdate, single)).map((e) => e.externalUid)).toEqual(["es"]);
+    expect(parseIcs(calendar(rdate), now).map((e) => e.externalUid)).toEqual([
+      "seminar#2026-12-01T04:00:00.000Z",
+    ]);
   });
 
-  it("繰り返し予定の個別変更（RECURRENCE-ID）も読み飛ばす", () => {
-    const moved = `
-      UID:baito
+  it("RDATE だけの予定で最初の回（DTSTART）が除外日なら、RDATE の回を返す", () => {
+    const rdate = `
+      UID:seminar
+      DTSTART;TZID=Asia/Tokyo:20261201T130000
+      RDATE;TZID=Asia/Tokyo:20261208T130000
+      EXDATE;TZID=Asia/Tokyo:20261201T130000
+    `;
+    expect(parseIcs(calendar(rdate), now).map((e) => e.externalUid)).toEqual([
+      "seminar#2026-12-08T04:00:00.000Z",
+    ]);
+  });
+
+  it("親が届いていない個別変更は、未来ならその1回だけ返す", () => {
+    const orphan = `
+      UID:lonely
       RECURRENCE-ID;TZID=Asia/Tokyo:20261207T180000
-      SUMMARY:バイト（時間変更）
+      SUMMARY:単独の回
       DTSTART;TZID=Asia/Tokyo:20261207T200000
     `;
-    expect(parseIcs(calendar(moved, single)).map((e) => e.externalUid)).toEqual(["es"]);
+    expect(parseIcs(calendar(orphan), now).map((e) => e.externalUid)).toEqual([
+      "lonely#2026-12-07T09:00:00.000Z",
+    ]);
+  });
+});
+
+describe("seriesUidOf", () => {
+  it("繰り返しの回のIDから元のUIDを取り出す", () => {
+    expect(seriesUidOf("gm@google.com#2026-11-30T01:00:00.000Z")).toBe("gm@google.com");
+  });
+  it("単発の予定は null（UIDに # が含まれていても日時の形でなければ単発）", () => {
+    expect(seriesUidOf("event-assignment-123")).toBeNull();
+    expect(seriesUidOf("abc#def")).toBeNull();
   });
 });
 
@@ -273,6 +349,40 @@ describe("planSync", () => {
       now,
     );
     expect(plan).toEqual({ inserts: [], updates: [{ id: 1, changes: { deadline: later } }] });
+  });
+
+  it("繰り返しの回が過ぎたら次の回を追加し、過ぎた回はそのまま（取り消し確認にしない）", () => {
+    const thisWeek = "gm#2026-11-16T01:00:00.000Z";
+    const nextWeek = "gm#2026-11-30T01:00:00.000Z";
+    const plan = planSync(
+      [task({ id: 1, externalUid: thisWeek, deadline: new Date("2026-11-16T01:00:00Z"), status: "done" })],
+      [event(nextWeek, { deadline: new Date("2026-11-30T01:00:00Z") })],
+      now,
+    );
+    expect(plan.updates).toEqual([]);
+    expect(plan.inserts.map((e) => e.externalUid)).toEqual([nextWeek]);
+  });
+
+  it("繰り返しのどれか1回を削除していたら、以後の回も追加しない（単発や他の繰り返しは追加する）", () => {
+    const plan = planSync(
+      [task({ id: 1, externalUid: "baito#2026-11-16T09:00:00.000Z", status: "dismissed" })],
+      [
+        event("baito#2026-11-23T09:00:00.000Z"),
+        event("gm#2026-11-30T01:00:00.000Z"),
+        event("single"),
+      ],
+      now,
+    );
+    expect(plan.inserts.map((e) => e.externalUid)).toEqual(["gm#2026-11-30T01:00:00.000Z", "single"]);
+  });
+
+  it("削除した回を戻したら（todo）、次の回からまた追加する", () => {
+    const plan = planSync(
+      [task({ id: 1, externalUid: "baito#2026-11-16T09:00:00.000Z", deadline: new Date("2026-11-16T09:00:00Z") })],
+      [event("baito#2026-11-23T09:00:00.000Z")],
+      now,
+    );
+    expect(plan.inserts.map((e) => e.externalUid)).toEqual(["baito#2026-11-23T09:00:00.000Z"]);
   });
 
   it("自分で削除したものがフィードから消えても「取り消し確認」にしない", () => {
@@ -391,7 +501,7 @@ describe("fetchIcs（実際の HTTP 通信）", () => {
     const { port } = server.address() as { port: number };
     try {
       const text = await fetchIcs(`http://127.0.0.1:${port}/feed.ics`);
-      expect(parseIcs(text).map((e) => e.title)).toEqual(["本物の通信"]);
+      expect(parseIcs(text, now).map((e) => e.title)).toEqual(["本物の通信"]);
 
       await expect(
         fetchIcs(`http://127.0.0.1:${port}/slow.ics`, { timeoutMs: 200 }),

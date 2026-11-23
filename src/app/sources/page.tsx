@@ -48,7 +48,10 @@ export default function SourcesPage() {
             </div>
             <ul className="list-disc space-y-1 pl-5 text-zinc-600 dark:text-zinc-400">
               <li>この URL を知っている人は誰でも予定を読めます。人に見せたり、git にコミットしたりしないでください</li>
-              <li>繰り返し予定（毎週のバイトなど）と、締切が過ぎた予定は取り込みません</li>
+              <li>
+                繰り返し予定は、これから来る直近の1回だけ取り込みます。毎週のバイトなど不要なものは、1回「削除」すると以後の回も出なくなります
+              </li>
+              <li>締切が過ぎた予定は取り込みません</li>
             </ul>
           </div>
         </details>

@@ -2,8 +2,13 @@
  * iCalフィード（K-LMS、Googleカレンダー）の取得・解析・照合。
  *
  *   fetchIcs  … URLからiCalの本文を取る（webcal:// も受け付ける）
- *   parseIcs  … 本文を締切の一覧にする（繰り返し予定は取り込まない）
+ *   parseIcs  … 本文を締切の一覧にする（繰り返し予定は直近の1回だけ）
  *   planSync  … DBにある締切とUIDで照合し、追加・更新の計画を返す（DBには触らない）
+ *
+ * 繰り返し予定（毎週の「GM資料」など）:
+ *   - これから来る最初の1回だけを締切にする。その回が過ぎたら、次の同期で次の回が出てくる
+ *   - 回ごとに「UID#その回の本来の開始日時（ISO）」で区別する（時間を変えた回も同じIDのまま）
+ *   - どれか1回を自分で「削除」したら、その繰り返し予定の以後の回も取り込まない（毎週のバイトなどを一度で消せる）
  *
  * 照合の規則（README「データ設計」）:
  *   - 一致したものは件名と締切だけ更新する。所要時間・完了状態・「残す」は上書きしない
@@ -27,10 +32,19 @@ export type TaskStatus = "todo" | "done" | "cancel_pending" | "dismissed";
 
 /** フィードから読み取った締切 */
 export interface FeedEvent {
-  /** iCalのUID */
+  /** iCalのUID。繰り返し予定の回は「UID#その回の本来の開始日時」 */
   externalUid: string;
   title: string;
   deadline: Date;
+}
+
+const OCCURRENCE_SEPARATOR = "#";
+/** 「UID#2026-11-30T01:00:00.000Z」の形。UIDそのものに「#」が含まれていても取り違えないよう、日時の形まで見る */
+const OCCURRENCE_PATTERN = /^(.+)#\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/** 繰り返し予定の回のIDから、繰り返し予定そのもののUIDを取り出す。単発の予定なら null */
+export function seriesUidOf(externalUid: string): string | null {
+  return OCCURRENCE_PATTERN.exec(externalUid)?.[1] ?? null;
 }
 
 /** DBにある、そのフィード由来の締切 */
@@ -118,12 +132,16 @@ export async function fetchIcs(feedUrl: string, options: FetchIcsOptions = {}): 
 // ---------------------------------------------------------------------------
 // 解析
 
+/** 壊れたRRULEで無限に回らないための上限 */
+const MAX_OCCURRENCES_TO_SCAN = 10_000;
+
 /**
  * iCalの本文を締切の一覧にする。
- * 繰り返し予定（RRULE・RDATE）とその個別変更（RECURRENCE-ID）は取り込まない。
- * 毎週のバイトなどは締切ではなく、取り込むと「見積もりを入れて」が埋まってしまうため。
+ * 単発の予定はすべて返す（過去のものも。追加するかは planSync が決める）。
+ * 繰り返し予定（RRULE・RDATE）は、now より後に来る最初の1回だけを返す。
+ * 個別の変更（RECURRENCE-ID）や回ごとの取り消し、除外日（EXDATE）は ical.js が反映する。
  */
-export function parseIcs(text: string): FeedEvent[] {
+export function parseIcs(text: string, now: Date): FeedEvent[] {
   let root: ICAL.Component;
   try {
     root = new ICAL.Component(ICAL.parse(text));
@@ -131,17 +149,80 @@ export function parseIcs(text: string): FeedEvent[] {
     throw new SyncError("parse", "iCalの内容を読み取れませんでした", { cause });
   }
 
+  const vevents = root.getAllSubcomponents("vevent");
+  const masterUids = new Set(vevents.filter((v) => !v.hasProperty("recurrence-id")).map(uidOf));
   const events: FeedEvent[] = [];
-  for (const vevent of root.getAllSubcomponents("vevent")) {
+
+  for (const vevent of vevents) {
     const uid = uidOf(vevent);
     if (!uid || isCancelled(vevent)) continue;
 
     const event = new ICAL.Event(vevent);
-    if (event.isRecurring() || event.isRecurrenceException()) continue;
 
-    events.push({ externalUid: uid, title: titleOf(event), deadline: timeToDate(event.startDate) });
+    if (event.isRecurrenceException()) {
+      // 個別変更は親の繰り返し予定の中で扱う。親が届いていないときだけ、その1回を単独で扱う
+      if (!masterUids.has(uid)) {
+        const deadline = timeToDate(event.startDate);
+        if (deadline > now) {
+          events.push({ externalUid: occurrenceUid(uid, event.recurrenceId), title: titleOf(event), deadline });
+        }
+      }
+      continue;
+    }
+
+    if (!event.isRecurring()) {
+      events.push({ externalUid: uid, title: titleOf(event), deadline: timeToDate(event.startDate) });
+      continue;
+    }
+
+    const next = nextOccurrence(event, now);
+    if (next) {
+      events.push({ externalUid: occurrenceUid(uid, next.recurrenceId), title: titleOf(next.item), deadline: next.deadline });
+    }
   }
   return events;
+}
+
+/** 繰り返し予定のうち、now より後に始まる最初の回（取り消された回は飛ばす） */
+function nextOccurrence(
+  event: ICAL.Event,
+  now: Date,
+): { recurrenceId: ICAL.Time; item: ICAL.Event; deadline: Date } | null {
+  // RFC 5545 では DTSTART も最初の回に数えるが、ical.js は RDATE だけの予定でこれを飛ばすので、先に確かめる
+  const first = event.startDate;
+  if (!isExcluded(event.component, first)) {
+    const details = event.getOccurrenceDetails(first);
+    const deadline = timeToDate(details.startDate);
+    if (!isCancelled(details.item.component) && deadline > now) {
+      return { recurrenceId: details.recurrenceId, item: details.item, deadline };
+    }
+  }
+
+  const iterator = event.iterator();
+  for (let i = 0; i < MAX_OCCURRENCES_TO_SCAN; i++) {
+    const time = iterator.next();
+    if (!time) return null;
+    const details = event.getOccurrenceDetails(time);
+    if (isCancelled(details.item.component)) continue;
+    const deadline = timeToDate(details.startDate);
+    if (deadline > now) {
+      return { recurrenceId: details.recurrenceId, item: details.item, deadline };
+    }
+  }
+  return null;
+}
+
+/** その日時が除外日（EXDATE）に入っているか */
+function isExcluded(vevent: ICAL.Component, time: ICAL.Time): boolean {
+  const target = timeToDate(time).getTime();
+  return vevent
+    .getAllProperties("exdate")
+    .flatMap((property) => property.getValues())
+    .some((value) => value instanceof ICAL.Time && timeToDate(value).getTime() === target);
+}
+
+function occurrenceUid(uid: string, recurrenceId: ICAL.Time): string {
+  return `${uid}${OCCURRENCE_SEPARATOR}${timeToDate(recurrenceId).toISOString()}`;
 }
 
 function uidOf(vevent: ICAL.Component): string {
@@ -205,6 +286,13 @@ export function planSync(
 
   const updates: TaskUpdate[] = [];
   const known = new Set<string>();
+  // どれか1回を自分で削除した繰り返し予定は、以後の回も取り込まない
+  const dismissedSeries = new Set(
+    existing
+      .filter((task) => task.status === "dismissed")
+      .map((task) => seriesUidOf(task.externalUid))
+      .filter((uid): uid is string => uid !== null),
+  );
 
   for (const task of existing) {
     known.add(task.externalUid);
@@ -222,9 +310,11 @@ export function planSync(
     if (Object.keys(changes).length > 0) updates.push({ id: task.id, changes });
   }
 
-  const inserts = [...eventsByUid.values()].filter(
-    (event) => !known.has(event.externalUid) && event.deadline > now,
-  );
+  const inserts = [...eventsByUid.values()].filter((event) => {
+    if (known.has(event.externalUid) || event.deadline <= now) return false;
+    const series = seriesUidOf(event.externalUid);
+    return series === null || !dismissedSeries.has(series);
+  });
 
   return { inserts, updates };
 }
@@ -237,6 +327,6 @@ export async function syncFeed(params: {
   fetchOptions?: FetchIcsOptions;
 }): Promise<SyncPlan> {
   const text = await fetchIcs(params.url, params.fetchOptions);
-  const events = parseIcs(text);
+  const events = parseIcs(text, params.now);
   return planSync(params.existing, events, params.now);
 }

@@ -9,6 +9,7 @@ import { refresh } from "next/cache";
 import { getDb } from "@/db/client";
 import * as mutations from "@/db/mutations";
 import { syncAllSources } from "@/db/syncSources";
+import { parseDeadlineInput } from "@/lib/deadlineInput";
 import { QUICK_ADD_ERROR_MESSAGES, parseQuickAdd } from "@/lib/parseQuickAdd";
 
 export type QuickAddState =
@@ -64,6 +65,23 @@ export async function dismissTask(formData: FormData): Promise<void> {
 
 export async function restoreTask(formData: FormData): Promise<void> {
   mutations.restoreTask(getDb(), readId(formData));
+  refresh();
+}
+
+/**
+ * 締切を変える。date は "YYYY-MM-DD"、time は "HH:MM"（空ならその日の 23:59）。
+ * 日付の入力欄（type="date"）と時刻の入力欄（type="time"）から送られる形をそのまま受け取る
+ */
+export async function changeDeadline(formData: FormData): Promise<void> {
+  const deadline = parseDeadlineInput(formData.get("date"), formData.get("time"));
+  if (deadline) {
+    mutations.setDeadline(getDb(), readId(formData), deadline);
+  }
+  refresh();
+}
+
+export async function resetDeadline(formData: FormData): Promise<void> {
+  mutations.resetDeadline(getDb(), readId(formData));
   refresh();
 }
 

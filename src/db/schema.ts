@@ -40,7 +40,13 @@ export const tasks = sqliteTable(
     /** iCalのUID。再同期で同じ締切を見つけるのに使う。手入力なら空 */
     externalUid: text("external_uid"),
     title: text("title").notNull(),
+    /** 締切。フィード由来ならフィードに書かれている締切で、同期のたびに更新される */
     deadline: integer("deadline", { mode: "timestamp_ms" }).notNull(),
+    /**
+     * 自分で変えた締切（フィード由来のときだけ使う）。あればこちらで並べ・表示する。
+     * deadline を直接書き換えると次の同期でフィードの締切に戻ってしまうので、別に持つ
+     */
+    deadlineOverride: integer("deadline_override", { mode: "timestamp_ms" }),
     /** 所要時間（分）。未入力なら空で「見積もりを入れて」欄に出る */
     estimateMinutes: integer("estimate_minutes"),
     status: text("status", { enum: TASK_STATUSES }).notNull().default("todo"),

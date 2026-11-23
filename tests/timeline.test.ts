@@ -30,17 +30,21 @@ describe("buildTimeline", () => {
     // 締切 12/5、3日 → 着手 12/2。帯は 12/2〜12/4、◆は 12/5
     const t = timeline([task("seminar", "2026-12-05T23:59", 3 * DAY)]);
     expect(rowOf(t, "seminar")).toMatchObject({
-      kind: "work",
+      group: "upcoming",
       startBy: "2026-12-02",
       bar: { start: 9, end: 11, clippedStart: false, clippedEnd: false },
       deadlineCol: 12,
+      afterRange: false,
     });
   });
 
   it("着手すべき日を過ぎていたら、帯を今日に切り詰めて遅れの印を付ける", () => {
     // 締切 11/26、1週間 → 着手 11/19（4日前）
     const t = timeline([task("late", "2026-11-26T23:59", 7 * DAY)]);
-    expect(rowOf(t, "late")?.bar).toEqual({ start: 0, end: 2, clippedStart: true, clippedEnd: false });
+    expect(rowOf(t, "late")).toMatchObject({
+      group: "today",
+      bar: { start: 0, end: 2, clippedStart: true, clippedEnd: false },
+    });
   });
 
   it("帯が範囲の後ろまで続くなら切り詰める。◆が範囲外なら null", () => {
@@ -49,6 +53,7 @@ describe("buildTimeline", () => {
     expect(rowOf(t, "long")).toMatchObject({
       bar: { start: 10, end: 13, clippedStart: false, clippedEnd: true },
       deadlineCol: null,
+      afterRange: false,
     });
   });
 
@@ -59,13 +64,19 @@ describe("buildTimeline", () => {
 
   it("締切を過ぎたものは帯も◆もなし（行は残す）", () => {
     const t = timeline([task("overdue", "2026-11-20T23:59", 30)]);
-    expect(rowOf(t, "overdue")).toMatchObject({ bar: null, deadlineCol: null });
+    expect(rowOf(t, "overdue")).toMatchObject({ group: "today", bar: null, deadlineCol: null, afterRange: false });
   });
 
-  it("着手すべき日が範囲より後のものは出さず、件数だけ数える", () => {
-    const t = timeline([task("far", "2027-01-25T16:00", 7 * DAY), task("near", "2026-11-25T23:59", 30)]);
-    expect(t.rows.map((r) => r.task.id)).toEqual(["near"]);
-    expect(t.laterCount).toBe(1);
+  it("着手すべき日が範囲より後のものも、操作できるよう行として返す（帯も◆もなし）", () => {
+    const t = timeline([task("far", "2027-01-25T16:00", 7 * DAY)]);
+    expect(rowOf(t, "far")).toMatchObject({
+      group: "upcoming",
+      bar: null,
+      deadlineCol: null,
+      startBy: "2027-01-18",
+      afterRange: true,
+    });
+    expect(t.load.every((n) => n === 0)).toBe(true);
   });
 
   it("日ごとの重なりを数える", () => {
@@ -79,19 +90,21 @@ describe("buildTimeline", () => {
     expect(t.load).toEqual([1, 2, 2, 0, 0]);
   });
 
-  it("見積もり待ちは◆だけで、帯ありの行のあとに締切順で並ぶ。範囲外は件数に数える", () => {
+  it("「今日やる」「見積もりを入れて」「これから」の順に並ぶ。見積もり待ちは◆だけ", () => {
     const t = timeline([
+      task("upcoming", "2026-12-01T23:59", 30),
       task("noEstimate2", "2026-11-30T23:59", null),
-      task("work", "2026-12-01T23:59", 30),
+      task("today", "2026-11-24T23:59", 30),
       task("noEstimate1", "2026-11-25T23:59", null),
       task("noEstimateFar", "2027-02-01T23:59", null),
     ]);
-    expect(t.rows.map((r) => [r.task.id, r.kind, r.deadlineCol])).toEqual([
-      ["work", "work", 8],
-      ["noEstimate1", "deadlineOnly", 2],
-      ["noEstimate2", "deadlineOnly", 7],
+    expect(t.rows.map((r) => [r.task.id, r.group, r.bar, r.deadlineCol, r.afterRange])).toEqual([
+      ["today", "today", { start: 0, end: 0, clippedStart: false, clippedEnd: false }, 1, false],
+      ["noEstimate1", "needsEstimate", null, 2, false],
+      ["noEstimate2", "needsEstimate", null, 7, false],
+      ["noEstimateFar", "needsEstimate", null, null, true],
+      ["upcoming", "upcoming", { start: 7, end: 7, clippedStart: false, clippedEnd: false }, 8, false],
     ]);
-    expect(t.laterCount).toBe(1);
   });
 
   it("日数が不正ならエラー", () => {

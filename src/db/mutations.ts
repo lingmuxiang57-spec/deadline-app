@@ -3,7 +3,7 @@
  * 状態の遷移はここで制限する（例: 完了にできるのは未着手だけ）。
  * いずれも対象が見つからない・遷移できないときは false を返す。
  */
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
 import { ESTIMATE_OPTIONS } from "@/lib/priority";
 import type { Db } from "./client";
 import { tasks } from "./schema";
@@ -87,6 +87,36 @@ export function dismissTask(db: Db, id: number): boolean {
     }
     return changed(tx.update(tasks).set({ status: "dismissed" }).where(eq(tasks.id, id)).run());
   });
+}
+
+/**
+ * 締切を変える（未着手のものだけ）。
+ *   - 手入力の締切 → 締切そのものを書き換える
+ *   - フィード由来の締切 → 自分の締切（deadline_override）に入れる。締切そのものは同期でフィードの値に保たれる
+ */
+export function setDeadline(db: Db, id: number, deadline: Date): boolean {
+  if (Number.isNaN(deadline.getTime())) return false;
+  return db.transaction((tx) => {
+    const task = tx
+      .select({ sourceId: tasks.sourceId })
+      .from(tasks)
+      .where(and(eq(tasks.id, id), eq(tasks.status, "todo")))
+      .get();
+    if (!task) return false;
+    const changes = task.sourceId === null ? { deadline } : { deadlineOverride: deadline };
+    return changed(tx.update(tasks).set(changes).where(eq(tasks.id, id)).run());
+  });
+}
+
+/** 自分で変えた締切をやめ、フィードの締切に戻す */
+export function resetDeadline(db: Db, id: number): boolean {
+  return changed(
+    db
+      .update(tasks)
+      .set({ deadlineOverride: null })
+      .where(and(eq(tasks.id, id), isNotNull(tasks.deadlineOverride)))
+      .run(),
+  );
 }
 
 /** 「削除済み」を未着手に戻す */

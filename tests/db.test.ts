@@ -370,3 +370,63 @@ describe("リストからの削除（dismissTask / restoreTask）", () => {
     expect(getTaskBoard(db, new Date("2026-12-05T10:00:00Z")).dismissed.map((t) => t.title)).toEqual(["レポート"]);
   });
 });
+
+describe("締切の変更（setDeadline / resetDeadline）", () => {
+  const later = new Date("2026-12-10T05:00:00Z");
+
+  it("手入力は締切そのものを書き換える", () => {
+    const id = mutations.addManualTask(db, { title: "手入力", deadline: future });
+    expect(mutations.setDeadline(db, id, later)).toBe(true);
+    expect(db.select().from(tasks).get()).toMatchObject({ deadline: later, deadlineOverride: null });
+  });
+
+  it("フィード由来は自分の締切に入れ、再同期してもフィードの締切に戻らない。戻すとフィードの締切になる", async () => {
+    const source = addSource();
+    const ics = (start: string) => calendar({ uid: "a", title: "レポート", start });
+    await syncSource(db, source.id, now, serve(ics("20261204T145900Z")));
+    const id = db.select().from(tasks).get()!.id;
+
+    expect(mutations.setDeadline(db, id, later)).toBe(true);
+    // その後、フィード側の締切も変わった
+    resetSyncAttempts();
+    await syncSource(db, source.id, now, serve(ics("20261206T145900Z")));
+
+    expect(db.select().from(tasks).get()).toMatchObject({
+      deadline: new Date("2026-12-06T14:59:00Z"), // フィードの締切は同期で更新される
+      deadlineOverride: later, // 自分の締切は残る
+    });
+    expect(getTaskBoard(db, now).open[0]).toMatchObject({
+      deadline: later, // 画面と並べ替えには自分の締切を使う
+      feedDeadline: new Date("2026-12-06T14:59:00Z"), // 元の締切も見せられる
+    });
+
+    expect(mutations.resetDeadline(db, id)).toBe(true);
+    expect(getTaskBoard(db, now).open[0]).toMatchObject({
+      deadline: new Date("2026-12-06T14:59:00Z"),
+      feedDeadline: null,
+    });
+    expect(mutations.resetDeadline(db, id)).toBe(false); // もう戻すものはない
+  });
+
+  it("未着手でないもの・不正な日時は変えない", () => {
+    const id = mutations.addManualTask(db, { title: "完了済み", deadline: future });
+    mutations.completeTask(db, id);
+    expect(mutations.setDeadline(db, id, later)).toBe(false);
+
+    const open = mutations.addManualTask(db, { title: "未着手", deadline: future });
+    expect(mutations.setDeadline(db, open, new Date("invalid"))).toBe(false);
+  });
+
+  it("自分で変えた締切で並べ替える", () => {
+    const source = addSource();
+    db.insert(tasks)
+      .values([
+        { title: "フィード", deadline: future, sourceId: source.id, externalUid: "f" },
+        { title: "手入力", deadline: new Date("2026-12-07T00:00:00Z") },
+      ])
+      .run();
+    const feedId = db.select().from(tasks).where(eq(tasks.externalUid, "f")).get()!.id;
+    mutations.setDeadline(db, feedId, new Date("2026-12-20T00:00:00Z"));
+    expect(getTaskBoard(db, now).open.map((t) => t.title)).toEqual(["手入力", "フィード"]);
+  });
+});

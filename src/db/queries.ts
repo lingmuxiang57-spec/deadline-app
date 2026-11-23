@@ -6,7 +6,11 @@ import { jstDateTime, toDateKey } from "@/lib/date";
 import type { Db } from "./client";
 import { type Source, type Task, sources, tasks } from "./schema";
 
-export type TaskWithSource = Task & { sourceName: string | null };
+/**
+ * 画面で使う締切。deadline は「実際に使う締切」（自分で変えていればその締切）に置き換えてある。
+ * feedDeadline はフィードに書かれている締切で、自分で変えたときだけ入る（画面で元の締切を見せるため）。
+ */
+export type TaskWithSource = Task & { sourceName: string | null; feedDeadline: Date | null };
 
 export interface TaskBoard {
   /** 未着手（「今日やる」「これから」「見積もりを入れて」に分ける元） */
@@ -24,9 +28,14 @@ export function getTaskBoard(db: Db, now: Date): TaskBoard {
     .select({ task: tasks, sourceName: sources.name })
     .from(tasks)
     .leftJoin(sources, eq(tasks.sourceId, sources.id))
-    .orderBy(asc(tasks.deadline))
     .all()
-    .map(({ task, sourceName }) => ({ ...task, sourceName }));
+    .map(({ task, sourceName }): TaskWithSource => ({
+      ...task,
+      deadline: task.deadlineOverride ?? task.deadline,
+      feedDeadline: task.deadlineOverride ? task.deadline : null,
+      sourceName,
+    }))
+    .sort((a, b) => a.deadline.getTime() - b.deadline.getTime());
 
   const startOfToday = jstDateTime(toDateKey(now), { hour: 0, minute: 0 });
   return {
